@@ -21,6 +21,8 @@
     lastDrift: 0,
     danmakuDelaySec: 0,
     decodeErrors: 0,
+    nextScheduleTime: 0,
+    lastScheduledPts: null,
     wsReconnectTimer: null,
     manualClose: false,
     offsetSyncTimer: null,
@@ -351,6 +353,8 @@
       ui.dot.classList.remove('on');
       ui.connect.textContent = '连接';
       ui.info.textContent = '未连接';
+      state.nextScheduleTime = 0;
+      state.lastScheduledPts = null;
     }
   }
 
@@ -400,6 +404,7 @@
     if (!state.playing) return;
     ensureAudioContext();
 
+    const prevPts = state.lastAudioPts;
     state.lastAudioPts = Number(msg.pts || 0);
 
     const arr = b64ToArrayBuffer(msg.data || '');
@@ -431,6 +436,8 @@
 
       if (drift < -1.8) {
         state.droppedSegments += 1;
+        state.nextScheduleTime = 0;
+        state.lastScheduledPts = null;
         sendControl('report_sync', {
           video_time: nowVideo,
           audio_pts: state.lastAudioPts,
@@ -457,8 +464,31 @@
       });
     }
 
-    const when = state.audioCtx.currentTime + delaySec;
+    const segDuration = Math.max(0.06, Number(msg.duration_ms || 0) / 1000 || audioBuffer.duration || 1.0);
+    if (prevPts != null) {
+      const ptsStep = state.lastAudioPts - prevPts;
+      if (!Number.isFinite(ptsStep) || ptsStep < -0.2 || ptsStep > 5) {
+        state.nextScheduleTime = 0;
+        state.lastScheduledPts = null;
+      }
+    }
+
+    const nowCtx = state.audioCtx.currentTime;
+    const minLeadSec = 0.06;
+    const desiredStart = nowCtx + Math.max(delaySec, minLeadSec);
+    if (!Number.isFinite(state.nextScheduleTime) || state.nextScheduleTime <= 0) {
+      state.nextScheduleTime = desiredStart;
+    }
+
+    let when = Math.max(state.nextScheduleTime, desiredStart);
+    const maxAhead = Math.max(1.5, state.bufferSec + 0.8);
+    if (when - nowCtx > maxAhead) {
+      when = desiredStart;
+    }
+
     source.start(when);
+    state.nextScheduleTime = when + segDuration;
+    state.lastScheduledPts = state.lastAudioPts;
     state.playedSegments += 1;
 
     ui.info.textContent = `播放中 seg=${msg.seg_id} pts=${state.lastAudioPts.toFixed(2)} played=${state.playedSegments} dropped=${state.droppedSegments}`;
@@ -647,6 +677,10 @@
   ui.togglePlay.addEventListener('click', () => {
     state.playing = !state.playing;
     ui.togglePlay.textContent = state.playing ? '暂停音频' : '恢复音频';
+    if (state.playing) {
+      state.nextScheduleTime = 0;
+      state.lastScheduledPts = null;
+    }
     sendControl(state.playing ? 'play' : 'pause');
   });
 

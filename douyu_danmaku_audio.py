@@ -650,38 +650,46 @@ async def _run_danmaku_crawler(args, queue: asyncio.Queue) -> None:
 
         const recorder = mimeType ? new MediaRecorder(audioStream, { mimeType }) : new MediaRecorder(audioStream);
         let stopped = false;
-        let rollingTimer = null;
         let forceRestartTimer = null;
         let noChunkWatchTimer = null;
         let lastChunkAt = Date.now();
+        let lastEmitAt = Date.now();
 
-        const FORCE_RESTART_MS = 90 * 1000;
-        const NO_CHUNK_TIMEOUT_MS = Math.max(%d * 4, 8000);
+        const CHUNK_MS = %d;
+        const FORCE_RESTART_MS = 5 * 60 * 1000;
+        const NO_CHUNK_TIMEOUT_MS = Math.max(CHUNK_MS * 4, 8000);
+        const WAVE_ACTIVE_RMS = 0.012;
 
-        const startOnce = () => {
-            if (stopped) return;
-            try {
-                recorder.start();
-                if (rollingTimer) {
-                    clearTimeout(rollingTimer);
-                    rollingTimer = null;
-                }
-                rollingTimer = setTimeout(() => {
-                    try {
-                        if (recorder.state === 'recording') recorder.stop();
-                    } catch (e) {
-                    }
-                }, %d);
-            } catch (e) {
+        let audioCtx = null;
+        let sourceNode = null;
+        let analyser = null;
+        let waveData = null;
+        try {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            if (AudioCtx) {
+                audioCtx = new AudioCtx();
+                sourceNode = audioCtx.createMediaStreamSource(audioStream);
+                analyser = audioCtx.createAnalyser();
+                analyser.fftSize = 1024;
+                sourceNode.connect(analyser);
+                waveData = new Uint8Array(analyser.fftSize);
             }
+        } catch (e) {
+        }
+
+        const getWaveRms = () => {
+            if (!analyser || !waveData) return 0;
+            analyser.getByteTimeDomainData(waveData);
+            let sum = 0;
+            for (let i = 0; i < waveData.length; i++) {
+                const v = (waveData[i] - 128) / 128;
+                sum += v * v;
+            }
+            return Math.sqrt(sum / waveData.length);
         };
 
-        const hardStop = () => {
+        const hardStop = (reason = 'restart') => {
             stopped = true;
-            if (rollingTimer) {
-                clearTimeout(rollingTimer);
-                rollingTimer = null;
-            }
             if (forceRestartTimer) {
                 clearTimeout(forceRestartTimer);
                 forceRestartTimer = null;
@@ -698,19 +706,33 @@ async def _run_danmaku_crawler(args, queue: asyncio.Queue) -> None:
                 tracks.forEach((t) => t.stop && t.stop());
             } catch (e) {
             }
+            try {
+                if (audioCtx && audioCtx.state !== 'closed') {
+                    audioCtx.close();
+                }
+            } catch (e) {
+            }
             window.__douyuAudioRecorder = null;
+            window.__douyuAudioWaveRms = 0;
+            window.__douyuAudioStopReason = reason;
         };
 
         recorder.ondataavailable = async (ev) => {
             try {
                 if (!ev.data || ev.data.size <= 0) return;
-                lastChunkAt = Date.now();
+                const now = Date.now();
+                const rms = getWaveRms();
+                const durationMs = Math.max(80, now - lastEmitAt);
+                lastEmitAt = now;
+                lastChunkAt = now;
+                window.__douyuAudioWaveRms = rms;
                 const b64 = await blobToBase64(ev.data);
                 await window.__pushAudioChunk({
                     b64,
                     mime: recorder.mimeType || mimeType || 'audio/webm',
-                    duration_ms: %d,
-                    client_ts: Date.now()
+                    duration_ms: durationMs,
+                    rms,
+                    client_ts: now
                 });
             } catch (e) {
             }
@@ -718,35 +740,49 @@ async def _run_danmaku_crawler(args, queue: asyncio.Queue) -> None:
 
         recorder.onstop = () => {
             if (!stopped) {
-                setTimeout(() => startOnce(), 0);
+                hardStop('unexpected_stop');
             }
         };
 
         recorder.onerror = () => {
-            hardStop();
+            hardStop('recorder_error');
         };
 
         tracks.forEach((t) => {
             t.onended = () => {
-                hardStop();
+                hardStop('track_ended');
             };
             t.onmute = () => {
             };
         });
 
         forceRestartTimer = setTimeout(() => {
-            hardStop();
+            hardStop('periodic_refresh');
         }, FORCE_RESTART_MS);
 
         noChunkWatchTimer = setInterval(() => {
-            if (Date.now() - lastChunkAt > NO_CHUNK_TIMEOUT_MS) {
-                hardStop();
+            const silentMs = Date.now() - lastChunkAt;
+            if (silentMs > NO_CHUNK_TIMEOUT_MS) {
+                const rms = getWaveRms();
+                window.__douyuAudioWaveRms = rms;
+                if (rms >= WAVE_ACTIVE_RMS) {
+                    hardStop('stuck_with_wave');
+                    return;
+                }
+                if (silentMs > NO_CHUNK_TIMEOUT_MS * 2) {
+                    hardStop('long_idle');
+                }
             }
         }, 2000);
 
-        startOnce();
-        window.__douyuAudioRecorder = recorder;
-        return true;
+        try {
+            recorder.start(CHUNK_MS);
+            window.__douyuAudioRecorder = recorder;
+            return true;
+        } catch (e) {
+            hardStop('start_failed');
+            return false;
+        }
     };
 
     setInterval(async () => {
@@ -756,7 +792,7 @@ async def _run_danmaku_crawler(args, queue: asyncio.Queue) -> None:
     startCapture();
 }
 """
-                % (args.audio_chunk_ms, args.audio_chunk_ms, args.audio_chunk_ms)
+                % (args.audio_chunk_ms,)
             )
             
             # 保持浏览器运行
