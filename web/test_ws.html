@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>WebSocket连接测试</title>
+    <style>
+        body {
+            font-family: 'Consolas', monospace;
+            padding: 20px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+        .connected { background: #28a745; color: white; }
+        .disconnected { background: #dc3545; color: white; }
+        .connecting { background: #ffc107; color: black; }
+        #log {
+            background: #252526;
+            border: 1px solid #3c3c3c;
+            padding: 15px;
+            margin-top: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-size: 13px;
+        }
+        .log-entry {
+            margin: 5px 0;
+            padding: 3px 0;
+            border-bottom: 1px solid #333;
+        }
+        .log-time {
+            color: #858585;
+        }
+        .log-info { color: #4ec9b0; }
+        .log-error { color: #f48771; }
+        .log-danmaku { color: #dcdcaa; }
+    </style>
+</head>
+<body>
+    <h1>🔌 WebSocket连接测试</h1>
+    <div id="status" class="status connecting">正在连接...</div>
+    <p>WebSocket地址: <code>ws://127.0.0.1:8766</code></p>
+    <button onclick="reconnect()">重新连接</button>
+    <button onclick="clearLog()">清空日志</button>
+    
+    <div id="log"></div>
+
+    <script>
+        let ws = null;
+        let messageCount = 0;
+        const logDiv = document.getElementById('log');
+        const statusDiv = document.getElementById('status');
+
+        function log(message, type = 'info') {
+            const time = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `<span class="log-time">[${time}]</span> <span class="log-${type}">${message}</span>`;
+            logDiv.insertBefore(entry, logDiv.firstChild);
+        }
+
+        function updateStatus(status, text) {
+            statusDiv.className = `status ${status}`;
+            statusDiv.textContent = text;
+        }
+
+        function connect() {
+            log('开始连接 WebSocket...', 'info');
+            updateStatus('connecting', '正在连接...');
+
+            try {
+                ws = new WebSocket('ws://127.0.0.1:8766');
+
+                ws.onopen = () => {
+                    log('✓ WebSocket 连接成功！', 'info');
+                    updateStatus('connected', '已连接 ✓');
+                };
+
+                ws.onmessage = (event) => {
+                    messageCount++;
+                    log(`[${messageCount}] 收到弹幕: ${event.data.substring(0, 100)}`, 'danmaku');
+                };
+
+                ws.onerror = (error) => {
+                    log('✗ WebSocket 错误: ' + error, 'error');
+                    updateStatus('disconnected', '连接错误 ✗');
+                };
+
+                ws.onclose = (event) => {
+                    log(`✗ WebSocket 关闭 (code: ${event.code}, reason: ${event.reason})`, 'error');
+                    updateStatus('disconnected', '连接断开 ✗');
+                    // 5秒后自动重连
+                    setTimeout(() => {
+                        log('5秒后自动重连...', 'info');
+                        connect();
+                    }, 5000);
+                };
+            } catch (error) {
+                log('✗ 创建 WebSocket 失败: ' + error, 'error');
+                updateStatus('disconnected', '创建失败 ✗');
+            }
+        }
+
+        function reconnect() {
+            if (ws) {
+                ws.close();
+            }
+            messageCount = 0;
+            connect();
+        }
+
+        function clearLog() {
+            logDiv.innerHTML = '';
+        }
+
+        // 页面加载时自动连接
+        window.onload = () => {
+            connect();
+        };
+    </script>
+</body>
+</html>

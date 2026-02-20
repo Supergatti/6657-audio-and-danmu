@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Douyu Danmaku</title>
+    <style>
+      :root {
+        --ink: #0b0f14;
+        --paper: #f6f4ef;
+        --accent: #f04f2a;
+        --accent-2: #1b6ca8;
+        --muted: rgba(11, 15, 20, 0.6);
+        --panel: rgba(255, 255, 255, 0.7);
+        --shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        color: var(--ink);
+        background: radial-gradient(1200px 600px at 10% 10%, #fff1e4, transparent),
+          radial-gradient(1000px 500px at 90% 20%, #e0f0ff, transparent),
+          linear-gradient(140deg, #f8f4ee 0%, #f2efe9 100%);
+        font-family: "Palatino Linotype", "Book Antiqua", Palatino, serif;
+        min-height: 100vh;
+        display: flex;
+        justify-content: center;
+        align-items: stretch;
+      }
+
+      .page {
+        width: min(1100px, 92vw);
+        padding: 32px 0 48px;
+        display: grid;
+        gap: 20px;
+      }
+
+      header {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: end;
+        gap: 16px;
+      }
+
+      .title {
+        font-size: clamp(28px, 4vw, 44px);
+        letter-spacing: 0.02em;
+        margin: 0;
+      }
+
+      .sub {
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 16px;
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        background: var(--panel);
+        backdrop-filter: blur(6px);
+        padding: 10px 14px;
+        border-radius: 999px;
+        box-shadow: var(--shadow);
+        font-family: "Consolas", "Courier New", monospace;
+        font-size: 13px;
+      }
+
+      .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #f04f2a;
+        box-shadow: 0 0 8px rgba(240, 79, 42, 0.5);
+      }
+
+      .dot.ok {
+        background: #2b9d5c;
+        box-shadow: 0 0 10px rgba(43, 157, 92, 0.5);
+      }
+
+      .panel {
+        background: var(--panel);
+        backdrop-filter: blur(8px);
+        border-radius: 18px;
+        padding: 20px;
+        box-shadow: var(--shadow);
+        display: grid;
+        gap: 12px;
+      }
+
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 12px;
+        font-family: "Consolas", "Courier New", monospace;
+      }
+
+      .stat {
+        padding: 12px 14px;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.6);
+      }
+
+      .stat label {
+        font-size: 12px;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      .stat div {
+        font-size: 18px;
+        margin-top: 6px;
+      }
+
+      .list {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        display: grid;
+        gap: 10px;
+        max-height: min(62vh, 620px);
+        overflow: auto;
+        font-family: "Consolas", "Courier New", monospace;
+        font-size: 14px;
+      }
+
+      .item {
+        padding: 10px 12px;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.7);
+        animation: rise 0.3s ease-out;
+      }
+
+      .item strong {
+        color: var(--accent-2);
+      }
+
+      .item span {
+        color: var(--accent);
+      }
+
+      @keyframes rise {
+        from {
+          opacity: 0;
+          transform: translateY(6px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      .footer {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      @media (max-width: 720px) {
+        header {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <header>
+        <div>
+          <h1 class="title">Douyu Danmaku Relay</h1>
+          <div class="sub">Room ID: <strong id="room">{{ROOM_ID}}</strong></div>
+        </div>
+        <div class="badge">
+          <span class="dot" id="status"></span>
+          <span id="statusText">disconnected</span>
+        </div>
+      </header>
+
+      <section class="panel">
+        <div class="stats">
+          <div class="stat">
+            <label>Total Messages</label>
+            <div id="total">0</div>
+          </div>
+          <div class="stat">
+            <label>Last User</label>
+            <div id="lastUser">-</div>
+          </div>
+          <div class="stat">
+            <label>Last Message</label>
+            <div id="lastMsg">-</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <ul class="list" id="list"></ul>
+      </section>
+
+      <div class="footer">WS endpoint: <span id="wsUrl"></span></div>
+    </main>
+
+    <script>
+      const list = document.getElementById("list");
+      const total = document.getElementById("total");
+      const lastUser = document.getElementById("lastUser");
+      const lastMsg = document.getElementById("lastMsg");
+      const statusDot = document.getElementById("status");
+      const statusText = document.getElementById("statusText");
+      const wsUrl = document.getElementById("wsUrl");
+
+      const scheme = location.protocol === "https:" ? "wss" : "ws";
+      const url = `${scheme}://${location.host}`;
+      wsUrl.textContent = url;
+
+      let count = 0;
+
+      function setStatus(ok) {
+        statusDot.classList.toggle("ok", ok);
+        statusText.textContent = ok ? "connected" : "disconnected";
+      }
+
+      const ws = new WebSocket(url);
+
+      ws.addEventListener("open", () => setStatus(true));
+      ws.addEventListener("close", () => setStatus(false));
+      ws.addEventListener("error", () => setStatus(false));
+
+      ws.addEventListener("message", (event) => {
+        const text = String(event.data || "").trim();
+        if (!text) return;
+
+        const item = document.createElement("li");
+        item.className = "item";
+        const closeIdx = text.indexOf("] ");
+        if (closeIdx > 0) {
+          const meta = text.slice(0, closeIdx + 1);
+          const rest = text.slice(closeIdx + 2);
+          const colonIdx = rest.indexOf(": ");
+          if (colonIdx > 0) {
+            const user = rest.slice(0, colonIdx);
+            const msg = rest.slice(colonIdx + 2);
+            const metaSpan = document.createElement("span");
+            metaSpan.textContent = meta + " ";
+            const userStrong = document.createElement("strong");
+            userStrong.textContent = user;
+            const msgText = document.createTextNode(": " + msg);
+            item.appendChild(metaSpan);
+            item.appendChild(userStrong);
+            item.appendChild(msgText);
+            lastUser.textContent = user;
+            lastMsg.textContent = msg.slice(0, 60);
+          } else {
+            item.textContent = text;
+          }
+        } else {
+          item.textContent = text;
+        }
+
+        list.prepend(item);
+        count += 1;
+        total.textContent = String(count);
+
+        while (list.children.length > 200) {
+          list.removeChild(list.lastChild);
+        }
+      });
+    </script>
+  </body>
+</html>

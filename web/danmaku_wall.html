@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>实时弹幕墙 - 斗鱼直播</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+            font-family: 'Microsoft YaHei', 'PingFang SC', 'Helvetica Neue', sans-serif;
+            overflow: hidden;
+            height: 100vh;
+            color: #fff;
+        }
+
+        .container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* 弹幕容器 */
+        .danmaku-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        /* 单条弹幕 */
+        .danmaku-item {
+            position: absolute;
+            white-space: nowrap;
+            font-size: 24px;
+            font-weight: 500;
+            text-shadow: 
+                2px 2px 4px rgba(0, 0, 0, 0.8),
+                0 0 10px rgba(0, 0, 0, 0.5);
+            padding: 8px 16px;
+            border-radius: 20px;
+            background: rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(5px);
+            animation: fly linear forwards;
+            will-change: transform;
+            opacity: 0.95;
+        }
+
+        @keyframes fly {
+            from {
+                transform: translateX(0);
+            }
+            to {
+                transform: translateX(calc(-100vw - 100%));
+            }
+        }
+
+        /* 控制面板 */
+        .control-panel {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(10px);
+            padding: 20px;
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            z-index: 1000;
+            min-width: 260px;
+            pointer-events: auto;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ff4444;
+            box-shadow: 0 0 12px rgba(255, 68, 68, 0.6);
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.connected {
+            background: #44ff44;
+            box-shadow: 0 0 12px rgba(68, 255, 68, 0.6);
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .status-text {
+            font-size: 14px;
+            color: #fff;
+        }
+
+        .stats {
+            display: grid;
+            gap: 10px;
+            margin-bottom: 16px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .stat-item {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+        }
+
+        .stat-label {
+            color: #aaa;
+        }
+
+        .stat-value {
+            color: #fff;
+            font-weight: 600;
+            font-family: 'Consolas', monospace;
+        }
+
+        .controls {
+            display: grid;
+            gap: 10px;
+        }
+
+        .control-group {
+            display: grid;
+            gap: 6px;
+        }
+
+        .control-label {
+            font-size: 12px;
+            color: #aaa;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .slider-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        input[type="range"] {
+            flex: 1;
+            height: 4px;
+            border-radius: 2px;
+            background: rgba(255, 255, 255, 0.2);
+            outline: none;
+            -webkit-appearance: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #4CAF50;
+            cursor: pointer;
+            box-shadow: 0 0 8px rgba(76, 175, 80, 0.5);
+        }
+
+        input[type="range"]::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #4CAF50;
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 0 8px rgba(76, 175, 80, 0.5);
+        }
+
+        .slider-value {
+            min-width: 35px;
+            text-align: right;
+            font-family: 'Consolas', monospace;
+            font-size: 12px;
+            color: #fff;
+        }
+
+        button {
+            padding: 10px 16px;
+            border: none;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-family: inherit;
+        }
+
+        button:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-1px);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        .toggle-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .toggle-btn:hover {
+            background: linear-gradient(135deg, #7e92f7 0%, #8b5db8 100%);
+        }
+
+        /* 顶部信息栏 */
+        .top-bar {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(10px);
+            padding: 16px 24px;
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            z-index: 1000;
+            pointer-events: auto;
+        }
+
+        .room-title {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .room-subtitle {
+            font-size: 13px;
+            color: #aaa;
+        }
+
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .control-panel {
+                top: auto;
+                bottom: 20px;
+                right: 20px;
+                left: 20px;
+                min-width: auto;
+            }
+
+            .top-bar {
+                left: 20px;
+                right: 20px;
+            }
+
+            .danmaku-item {
+                font-size: 18px;
+            }
+        }
+
+        /* 调试面板样式 */
+        .debug-panel {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 15px 20px;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            z-index: 1001;
+            min-width: 450px;
+            max-width: 650px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 11px;
+            color: #0f0;
+            border: 2px solid #0f0;
+            transition: all 0.3s ease;
+        }
+
+        .debug-panel.minimized {
+            min-width: auto;
+            max-width: auto;
+            width: auto;
+            padding: 10px 15px;
+        }
+
+        .debug-panel.minimized #debugLog {
+            display: none;
+        }
+
+        .debug-title {
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #0ff;
+            border-bottom: 1px solid #0ff;
+            padding-bottom: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .debug-panel.minimized .debug-title {
+            margin-bottom: 0;
+            border-bottom: none;
+        }
+
+        .debug-minimize-btn {
+            background: none;
+            border: 1px solid #0ff;
+            color: #0ff;
+            padding: 2px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 11px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            transition: all 0.2s;
+        }
+
+        .debug-minimize-btn:hover {
+            background: rgba(0, 255, 255, 0.2);
+            transform: scale(1.05);
+        }
+
+        #debugLog {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .debug-line {
+            margin: 3px 0;
+            padding: 2px 5px;
+            border-left: 2px solid #0f0;
+            padding-left: 8px;
+            word-wrap: break-word;
+        }
+
+        .debug-line.error {
+            color: #f44;
+            border-left-color: #f44;
+            font-weight: 600;
+        }
+
+        .debug-line.success {
+            color: #4f4;
+            border-left-color: #4f4;
+        }
+
+        .debug-line.warning {
+            color: #ff4;
+            border-left-color: #ff4;
+        }
+
+        .debug-line.info {
+            color: #0ff;
+            border-left-color: #0ff;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="top-bar">
+            <div class="room-title">🎉 实时弹幕墙</div>
+            <div class="room-subtitle">房间ID: <span id="roomId">加载中...</span></div>
+        </div>
+
+        <!-- 调试面板 -->
+        <div class="debug-panel" id="debugPanel">
+            <div class="debug-title" id="debugTitle">
+                <span>🔍 WebSocket 连接调试</span>
+                <button class="debug-minimize-btn" id="debugMinimizeBtn">−</button>
+            </div>
+            <div id="debugLog"></div>
+        </div>
+
+        <div class="control-panel">
+            <div class="status-indicator">
+                <div class="status-dot" id="statusDot"></div>
+                <div class="status-text" id="statusText">连接中...</div>
+            </div>
+
+            <div class="stats">
+                <div class="stat-item">
+                    <span class="stat-label">总弹幕数</span>
+                    <span class="stat-value" id="totalCount">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">当前显示</span>
+                    <span class="stat-value" id="activeCount">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">平均速度</span>
+                    <span class="stat-value" id="avgSpeed">0/分钟</span>
+                </div>
+            </div>
+
+            <div class="controls">
+                <div class="control-group">
+                    <label class="control-label">速度</label>
+                    <div class="slider-container">
+                        <input type="range" id="speedSlider" min="5" max="20" value="10" step="1">
+                        <span class="slider-value" id="speedValue">10s</span>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <label class="control-label">字体大小</label>
+                    <div class="slider-container">
+                        <input type="range" id="fontSizeSlider" min="16" max="40" value="24" step="2">
+                        <span class="slider-value" id="fontSizeValue">24px</span>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <label class="control-label">不透明度</label>
+                    <div class="slider-container">
+                        <input type="range" id="opacitySlider" min="50" max="100" value="95" step="5">
+                        <span class="slider-value" id="opacityValue">95%</span>
+                    </div>
+                </div>
+
+                <button class="toggle-btn" id="toggleBtn">暂停弹幕</button>
+                <button id="clearBtn">清空屏幕</button>
+            </div>
+        </div>
+
+        <div class="danmaku-container" id="danmakuContainer"></div>
+    </div>
+
+    <script>
+        class DanmakuWall {
+            constructor() {
+                this.ws = null;
+                this.danmakuContainer = document.getElementById('danmakuContainer');
+                this.statusDot = document.getElementById('statusDot');
+                this.statusText = document.getElementById('statusText');
+                this.debugLog = document.getElementById('debugLog');
+                this.totalCount = 0;
+                this.activeCount = 0;
+                this.isPaused = false;
+                this.pendingQueue = [];
+                
+                // 配置
+                this.config = {
+                    speed: 10, // 秒
+                    fontSize: 24,
+                    opacity: 0.95,
+                    trackCount: 12, // 轨道数量
+                    trackHeight: 60 // 轨道高度
+                };
+
+                // 轨道占用情况
+                this.tracks = new Array(this.config.trackCount).fill(0);
+                
+                // 统计数据
+                this.stats = {
+                    startTime: Date.now(),
+                    messageCount: 0
+                };
+
+                this.colors = [
+                    '#FF6B9D', '#C44569', '#F8B500', '#FFC312',
+                    '#12CBC4', '#1289A7', '#5F27CD', '#0652DD',
+                    '#EA2027', '#EE5A6F', '#00D2D3', '#FDA7DF',
+                    '#4834DF', '#6F1E51', '#B53471', '#FD7272'
+                ];
+
+                this.init();
+            }
+
+            addDebugLog(message, type = 'info') {
+                const time = new Date().toLocaleTimeString();
+                const line = document.createElement('div');
+                line.className = `debug-line ${type}`;
+                line.textContent = `[${time}] ${message}`;
+                this.debugLog.appendChild(line);
+                
+                // 保持最多50条日志
+                while (this.debugLog.children.length > 50) {
+                    this.debugLog.removeChild(this.debugLog.firstChild);
+                }
+                
+                // 自动滚动到底部
+                this.debugLog.scrollTop = this.debugLog.scrollHeight;
+                
+                // 同时输出到console
+                console.log(`[${type.toUpperCase()}] ${message}`);
+            }
+
+            init() {
+                this.addDebugLog('页面加载完成，初始化弹幕墙...', 'info');
+                this.setupDebugPanel();
+                this.connectWebSocket();
+                this.setupControls();
+                this.startStatsUpdate();
+            }
+
+            setupDebugPanel() {
+                const debugPanel = document.getElementById('debugPanel');
+                const minimizeBtn = document.getElementById('debugMinimizeBtn');
+                const debugTitle = document.getElementById('debugTitle');
+                
+                // 点击按钮或标题切换最小化状态
+                const toggleMinimize = () => {
+                    debugPanel.classList.toggle('minimized');
+                    minimizeBtn.textContent = debugPanel.classList.contains('minimized') ? '+' : '−';
+                };
+                
+                minimizeBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    toggleMinimize();
+                });
+                
+                debugTitle.addEventListener('click', toggleMinimize);
+            }
+
+            connectWebSocket() {
+                // 使用当前页面的host，这样无论从哪个地址访问都能正确连接
+                const wsUrl = `ws://${window.location.host}`;
+                this.updateStatus('connecting', '连接中...');
+                
+                this.addDebugLog(`页面地址: ${window.location.href}`, 'info');
+                this.addDebugLog(`window.location.host = ${window.location.host}`, 'info');
+                this.addDebugLog(`尝试连接WebSocket: ${wsUrl}`, 'info');
+
+                try {
+                    this.ws = new WebSocket(wsUrl);
+                    this.addDebugLog('WebSocket对象已创建', 'success');
+
+                    this.ws.onopen = () => {
+                        this.updateStatus('connected', '已连接');
+                        this.addDebugLog('✓ WebSocket连接成功!', 'success');
+                    };
+
+                    this.ws.onmessage = (event) => {
+                        this.addDebugLog(`收到弹幕: ${event.data.substring(0, 50)}...`, 'success');
+                        this.handleMessage(event.data);
+                    };
+
+                    this.ws.onerror = (error) => {
+                        this.addDebugLog(`WebSocket错误: ${error}`, 'error');
+                        this.addDebugLog(`错误类型: ${error.type}`, 'error');
+                        this.updateStatus('error', '连接错误');
+                    };
+
+                    this.ws.onclose = (event) => {
+                        this.updateStatus('disconnected', '连接断开');
+                        this.addDebugLog(`连接关闭 - 代码: ${event.code}`, 'warning');
+                        this.addDebugLog(`关闭原因: ${event.reason || '无'}`, 'warning');
+                        this.addDebugLog(`是否正常关闭: ${event.wasClean ? '是' : '否'}`, 'warning');
+                        this.addDebugLog('5秒后尝试重连...', 'info');
+                        // 5秒后重连
+                        setTimeout(() => this.connectWebSocket(), 5000);
+                    };
+                } catch (error) {
+                    this.addDebugLog(`创建WebSocket失败: ${error.message}`, 'error');
+                    this.addDebugLog(`错误堆栈: ${error.stack}`, 'error');
+                    this.updateStatus('error', '连接失败');
+                    // 失败后也尝试重连
+                    setTimeout(() => this.connectWebSocket(), 5000);
+                }
+            }
+
+            handleMessage(message) {
+                this.stats.messageCount++;
+                this.totalCount++;
+                this.updateTotalCount();
+
+                // 解析弹幕
+                const danmaku = this.parseDanmaku(message);
+                
+                if (!this.isPaused) {
+                    this.addDanmaku(danmaku);
+                } else {
+                    this.pendingQueue.push(danmaku);
+                }
+            }
+
+            parseDanmaku(message) {
+                // 格式: [2024-01-01 12:00:00] 用户名: 弹幕内容
+                const match = message.match(/\[(.*?)\]\s*(.*?):\s*(.*)/);
+                if (match) {
+                    return {
+                        time: match[1],
+                        user: match[2],
+                        text: match[3]
+                    };
+                }
+                return {
+                    time: new Date().toLocaleTimeString(),
+                    user: '未知',
+                    text: message
+                };
+            }
+
+            addDanmaku(danmaku) {
+                // 找到可用轨道
+                const trackIndex = this.findAvailableTrack();
+                if (trackIndex === -1) {
+                    // 没有可用轨道，延迟添加
+                    setTimeout(() => this.addDanmaku(danmaku), 100);
+                    return;
+                }
+
+                // 创建弹幕元素
+                const element = document.createElement('div');
+                element.className = 'danmaku-item';
+                element.textContent = `${danmaku.user}: ${danmaku.text}`;
+                element.style.fontSize = `${this.config.fontSize}px`;
+                element.style.opacity = this.config.opacity;
+                element.style.color = this.colors[Math.floor(Math.random() * this.colors.length)];
+                element.style.top = `${trackIndex * this.config.trackHeight + 20}px`;
+                element.style.right = '-100%';
+                element.style.animationDuration = `${this.config.speed}s`;
+
+                this.danmakuContainer.appendChild(element);
+                this.activeCount++;
+                this.updateActiveCount();
+
+                // 获取元素宽度并设置初始位置
+                const elementWidth = element.offsetWidth;
+                element.style.right = `-${elementWidth}px`;
+
+                // 标记轨道占用
+                this.tracks[trackIndex] = Date.now();
+                
+                // 计算什么时候轨道会空闲
+                const trackFreeTime = (elementWidth / window.innerWidth) * this.config.speed * 1000;
+                setTimeout(() => {
+                    this.tracks[trackIndex] = 0;
+                }, trackFreeTime);
+
+                // 动画结束后移除
+                element.addEventListener('animationend', () => {
+                    element.remove();
+                    this.activeCount--;
+                    this.updateActiveCount();
+                });
+            }
+
+            findAvailableTrack() {
+                const now = Date.now();
+                const minInterval = 300; // 最小间隔时间（毫秒）
+
+                for (let i = 0; i < this.tracks.length; i++) {
+                    if (now - this.tracks[i] > minInterval) {
+                        return i;
+                    }
+                }
+                return -1;
+            }
+
+            setupControls() {
+                // 速度控制
+                const speedSlider = document.getElementById('speedSlider');
+                const speedValue = document.getElementById('speedValue');
+                speedSlider.addEventListener('input', (e) => {
+                    this.config.speed = parseInt(e.target.value);
+                    speedValue.textContent = `${this.config.speed}s`;
+                });
+
+                // 字体大小控制
+                const fontSizeSlider = document.getElementById('fontSizeSlider');
+                const fontSizeValue = document.getElementById('fontSizeValue');
+                fontSizeSlider.addEventListener('input', (e) => {
+                    this.config.fontSize = parseInt(e.target.value);
+                    fontSizeValue.textContent = `${this.config.fontSize}px`;
+                });
+
+                // 不透明度控制
+                const opacitySlider = document.getElementById('opacitySlider');
+                const opacityValue = document.getElementById('opacityValue');
+                opacitySlider.addEventListener('input', (e) => {
+                    this.config.opacity = parseInt(e.target.value) / 100;
+                    opacityValue.textContent = `${e.target.value}%`;
+                });
+
+                // 暂停/继续按钮
+                const toggleBtn = document.getElementById('toggleBtn');
+                toggleBtn.addEventListener('click', () => {
+                    this.isPaused = !this.isPaused;
+                    toggleBtn.textContent = this.isPaused ? '继续弹幕' : '暂停弹幕';
+                    
+                    if (!this.isPaused && this.pendingQueue.length > 0) {
+                        // 恢复时添加等待的弹幕
+                        const queue = [...this.pendingQueue];
+                        this.pendingQueue = [];
+                        queue.forEach(danmaku => {
+                            setTimeout(() => this.addDanmaku(danmaku), Math.random() * 1000);
+                        });
+                    }
+                });
+
+                // 清空按钮
+                const clearBtn = document.getElementById('clearBtn');
+                clearBtn.addEventListener('click', () => {
+                    this.clearScreen();
+                });
+            }
+
+            clearScreen() {
+                this.danmakuContainer.innerHTML = '';
+                this.activeCount = 0;
+                this.updateActiveCount();
+                this.tracks.fill(0);
+            }
+
+            updateStatus(status, text) {
+                this.statusText.textContent = text;
+                this.statusDot.className = 'status-dot';
+                if (status === 'connected') {
+                    this.statusDot.classList.add('connected');
+                }
+            }
+
+            updateTotalCount() {
+                document.getElementById('totalCount').textContent = this.totalCount.toLocaleString();
+            }
+
+            updateActiveCount() {
+                document.getElementById('activeCount').textContent = this.activeCount;
+            }
+
+            startStatsUpdate() {
+                setInterval(() => {
+                    const elapsed = (Date.now() - this.stats.startTime) / 1000 / 60; // 分钟
+                    const avgSpeed = elapsed > 0 ? Math.round(this.stats.messageCount / elapsed) : 0;
+                    document.getElementById('avgSpeed').textContent = `${avgSpeed}/分钟`;
+                }, 1000);
+            }
+        }
+
+        // 启动弹幕墙
+        document.addEventListener('DOMContentLoaded', () => {
+            const wall = new DanmakuWall();
+            
+            // 从URL获取房间ID
+            const urlParams = new URLSearchParams(window.location.search);
+            const roomId = urlParams.get('room') || '{{ROOM_ID}}';
+            document.getElementById('roomId').textContent = roomId;
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "斗鱼弹幕叠加 - YouTube版",
+  "version": "1.0",
+  "description": "将本地斗鱼弹幕服务的弹幕实时叠加到YouTube直播画面上",
+  "permissions": [
+    "storage",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "ws://127.0.0.1:8766"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/watch*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "弹幕叠加控制",
+    "default_icon": {
+      "48": "icon.png"
+    }
+  },
+  "icons": {
+    "48": "icon.png"
+  }
+}

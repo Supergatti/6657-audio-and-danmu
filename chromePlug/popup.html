@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>弹幕叠加</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      width: 280px;
+      background: linear-gradient(135deg, #0f0c29, #302b63);
+      color: #fff;
+      font-family: 'Microsoft YaHei', sans-serif;
+      font-size: 13px;
+      padding: 16px;
+    }
+    h2 {
+      font-size: 15px;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .tip {
+      background: rgba(255,255,255,0.07);
+      border-radius: 10px;
+      padding: 12px;
+      margin-bottom: 12px;
+      line-height: 1.8;
+      color: #ccc;
+    }
+    .tip strong { color: #fff; }
+    .tip code {
+      background: rgba(255,255,255,0.12);
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-family: monospace;
+      color: #7ee8a2;
+    }
+    .step {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .step-num {
+      width: 20px; height: 20px;
+      border-radius: 50%;
+      background: #667eea;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px;
+      font-weight: bold;
+      flex-shrink: 0;
+    }
+    .step-text { color: #ccc; line-height: 1.6; }
+    .footer {
+      margin-top: 12px;
+      text-align: center;
+      font-size: 11px;
+      color: rgba(255,255,255,0.35);
+    }
+  </style>
+</head>
+<body>
+  <h2>🎉 斗鱼弹幕叠加</h2>
+  <div class="tip">
+    打开 YouTube 直播页面后，弹幕控制面板会自动出现在页面顶部，
+    默认连接 <code>ws://127.0.0.1:8766</code>。
+  </div>
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-text">运行本地弹幕服务：<br><code>python douyu_danmaku.py</code></div>
+  </div>
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-text">打开任意 YouTube 直播页面</div>
+  </div>
+  <div class="step">
+    <div class="step-num">3</div>
+    <div class="step-text">页面顶部会出现弹幕控制面板，弹幕自动飘过</div>
+  </div>
+  <div class="footer">可在面板中拖动、调整速度/字号/透明度</div>
+</body>
+</html>

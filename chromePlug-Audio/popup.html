@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>斗鱼音频桥接</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      width: 280px;
+      background: linear-gradient(135deg, #0f0c29, #302b63);
+      color: #fff;
+      font-family: 'Microsoft YaHei', sans-serif;
+      font-size: 13px;
+      padding: 16px;
+    }
+    h2 {
+      font-size: 15px;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .tip {
+      background: rgba(255,255,255,0.07);
+      border-radius: 10px;
+      padding: 12px;
+      margin-bottom: 12px;
+      line-height: 1.8;
+      color: #ccc;
+    }
+    .tip strong { color: #fff; }
+    .tip code {
+      background: rgba(255,255,255,0.12);
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-family: monospace;
+      color: #7ee8a2;
+    }
+    .step {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .step-num {
+      width: 20px; height: 20px;
+      border-radius: 50%;
+      background: #667eea;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px;
+      font-weight: bold;
+      flex-shrink: 0;
+    }
+    .step-text { color: #ccc; line-height: 1.6; }
+    .footer {
+      margin-top: 12px;
+      text-align: center;
+      font-size: 11px;
+      color: rgba(255,255,255,0.35);
+    }
+  </style>
+</head>
+<body>
+  <h2>🎧 斗鱼音频桥接</h2>
+  <div class="tip">
+    打开 YouTube 页面后，右侧会出现音频桥接面板，
+    默认连接 <code>ws://127.0.0.1:8766</code>，接收 <code>audio_segment</code> 与 <code>danmaku</code>。
+  </div>
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-text">运行本地桥接服务：<br><code>python douyu_danmaku_audio.py --headed</code></div>
+  </div>
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-text">打开任意 YouTube 视频/直播页面，并点击面板“连接”</div>
+  </div>
+  <div class="step">
+    <div class="step-num">3</div>
+    <div class="step-text">使用“对齐当前帧 + 偏移(ms)”完成音画同步</div>
+  </div>
+  <div class="footer">可调：缓冲、音量、偏移、自动校准</div>
+</body>
+</html>

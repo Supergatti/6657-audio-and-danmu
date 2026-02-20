@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "斗鱼音频桥接 - YouTube同步版",
+  "version": "1.1.0",
+  "description": "接收本地斗鱼音频与弹幕服务，在 YouTube 页面进行音画同步播放控制",
+  "permissions": [
+    "storage",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "http://127.0.0.1:8766/*",
+    "ws://127.0.0.1:8766/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/watch*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "斗鱼音频桥接控制"
+  }
+}
