@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+
+# Runtime/output artifacts
+danmaku_logs/
+recorded_messages.log
+

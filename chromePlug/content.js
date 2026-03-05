@@ -237,6 +237,29 @@
       box-shadow: 0 4px 16px rgba(0,0,0,0.4);
     }
     #dk-show-fab:hover { background: rgba(40,40,60,0.95); }
+    .dk-segment {
+      display: flex;
+      background: rgba(255,255,255,0.06);
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.15);
+      margin: 0 0 8px 0;
+    }
+    .dk-segment-btn {
+      flex: 1;
+      padding: 6px 0;
+      background: none;
+      border: none;
+      color: #bbb;
+      font-size: 12px;
+      font-family: 'Microsoft YaHei', sans-serif;
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s;
+    }
+    .dk-segment-btn.active {
+      background: linear-gradient(135deg,#667eea,#764ba2);
+      color: #fff;
+    }
   `;
   document.head.appendChild(style);
 
@@ -293,12 +316,13 @@
       </div>
     </div>
     <div class="dk-sep"></div>
-    <div class="dk-toggle-row">
-      <span>显示用户ID</span>
-      <label class="dk-sw">
-        <input type="checkbox" id="dk-show-id" checked>
-        <span class="dk-sw-track"></span>
-      </label>
+    <div class="dk-row">
+      <label class="dk-lbl">显示模式</label>
+      <div class="dk-segment" id="dk-mode-segment" style="flex:1;">
+        <button class="dk-segment-btn active" data-mode="content">仅弹幕</button>
+        <button class="dk-segment-btn" data-mode="user_content">@昵称：弹幕</button>
+        <button class="dk-segment-btn" data-mode="user_level_color">@昵称（等级 颜色）：弹幕</button>
+      </div>
     </div>
     <div class="dk-toggle-row">
       <span>弹幕背景</span>
@@ -357,6 +381,16 @@
     '#00D2D3','#FF9F43','#54a0ff','#ff6b6b','#48dbfb',
     '#1dd1a1','#ffeaa7','#a29bfe','#fd79a8','#e17055'
   ];
+
+  const COLOR_NAME_MAP = {
+    '0': '白色',
+    '1': '红色',
+    '2': '绿色',
+    '3': '蓝色',
+    '4': '紫色',
+    '5': '橙色',
+    '6': '青色',
+  };
 
   /** 运行时配置 */
   const cfg = {
@@ -434,15 +468,74 @@
     return 200;
   }
 
-  function addDanmaku({ user, text }) {
+  function getCurrentMode() {
+    const modeSegment = document.getElementById('dk-mode-segment');
+    if (!modeSegment) return 'content';
+    const activeBtn = modeSegment.querySelector('.dk-segment-btn.active');
+    return activeBtn?.getAttribute('data-mode') || 'content';
+  }
+
+  function formatDanmakuText({ user, text, level, col }, mode) {
+    const name = (typeof user === 'string' ? user : '');
+    const content = (typeof text === 'string' ? text : '');
+    const lv = level ? `Lv${level}` : '';
+    const colorName = (col !== undefined && col !== null && col !== '')
+      ? (COLOR_NAME_MAP[String(col)] || `色号${col}`)
+      : '';
+
+    if (mode === 'user_content') {
+      return name ? `@${name}：${content}` : content;
+    }
+
+    if (mode === 'user_level_color') {
+      const extra = (lv || colorName) ? `（${[lv, colorName].filter(Boolean).join(' ')}）` : '';
+      return name ? `@${name}${extra}：${content}` : content;
+    }
+
+    return content;
+  }
+
+  function refreshVisibleDanmakuByMode() {
+    const mode = getCurrentMode();
+    overlay.querySelectorAll('.dk-item').forEach((el) => {
+      const dk = {
+        user: el.dataset.user || '',
+        text: el.dataset.text || el.textContent || '',
+        level: el.dataset.level || '',
+        col: el.dataset.col || '',
+      };
+      el.textContent = formatDanmakuText(dk, mode);
+    });
+  }
+
+  function addDanmaku({ user, text, level = '', col = '' }) {
     const idx = findTrack();
     if (idx === -1) return;
     const el = document.createElement('div');
+    const mode = getCurrentMode();
+    const display = formatDanmakuText({ user, text, level, col }, mode);
     el.className = 'dk-item';
-    el.textContent = (cfg.showId && user) ? `${user}: ${text}` : text;
+    el.textContent = display;
+    el.dataset.user = String(user || '');
+    el.dataset.text = String(text || '');
+    el.dataset.level = String(level || '');
+    el.dataset.col = String(col || '');
     el.style.fontSize          = `${cfg.fontSize}px`;
     el.style.opacity           = cfg.opacity;
-    el.style.color             = COLORS[Math.floor(Math.random() * COLORS.length)];
+    // 字体颜色根据 col 字段映射
+    const COLOR_CODE_MAP = {
+      '0': '#ffffff', // 白色
+      '1': '#ff0000', // 红色
+      '2': '#00ff00', // 绿色
+      '3': '#0000ff', // 蓝色
+      '4': '#a020f0', // 紫色
+      '5': '#ffa500', // 橙色
+      '6': '#00ffff', // 青色
+    };
+    let fontColor = (col !== undefined && col !== null && col !== '' && COLOR_CODE_MAP[String(col)])
+      ? COLOR_CODE_MAP[String(col)]
+      : COLORS[Math.floor(Math.random() * COLORS.length)];
+    el.style.color = fontColor;
     el.style.background        = cfg.showBg ? 'rgba(0,0,0,0.25)' : 'none';
     el.style.top               = `${idx * cfg.trackHeight + 8}px`;
     el.style.right             = '-200%';
@@ -484,17 +577,40 @@
       ws.onmessage = (e) => {
         let raw = e.data;
         if (typeof raw !== 'string') return;
+        let dk = null;
         try {
           const obj = JSON.parse(raw);
-          if (obj && obj.type === 'danmaku' && typeof obj.text === 'string') {
-            raw = obj.text;
-          } else {
-            return;
+          if (obj && typeof obj === 'object') {
+            // 兼容旧封装格式 { type: 'danmaku', text: '...' }
+            if (obj.type === 'danmaku' && typeof obj.text === 'string') {
+              dk = parseDanmaku(obj.text);
+            }
+            // 兼容斗鱼字段格式 { type: 'chatmsg', nn, txt, level, col }
+            if (!dk && (obj.type === 'chatmsg' || obj.type === 'hischatmsg') && typeof obj.txt === 'string') {
+              dk = {
+                user: obj.nn || '',
+                text: obj.txt,
+                level: obj.level || obj.bl || '',
+                col: obj.col || obj.nc || '',
+              };
+            }
+            // 兜底：若已有统一字段，直接使用
+            if (!dk && typeof obj.text === 'string') {
+              dk = {
+                user: obj.user || obj.nn || '',
+                text: obj.text,
+                level: obj.level || '',
+                col: obj.col || '',
+              };
+            }
           }
         } catch {
           // 兼容旧版纯文本弹幕消息
         }
-        const dk = parseDanmaku(raw);
+
+        if (!dk) {
+          dk = parseDanmaku(raw);
+        }
         enqueueDanmaku(dk);
       };
       ws.onerror = () => setStatus(false, '连接错误');
@@ -534,10 +650,18 @@
     });
   });
 
-  // 开关：显示用户ID
-  document.getElementById('dk-show-id').addEventListener('change', function () {
-    cfg.showId = this.checked;
-  });
+  // 显示模式三段按钮切换
+  const modeSegment = document.getElementById('dk-mode-segment');
+  if (modeSegment) {
+    modeSegment.querySelectorAll('.dk-segment-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        modeSegment.querySelectorAll('.dk-segment-btn').forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+        // 点击模式后立刻刷新当前屏幕上的弹幕文本
+        refreshVisibleDanmakuByMode();
+      });
+    });
+  }
 
   // 开关：弹幕背景
   document.getElementById('dk-show-bg').addEventListener('change', function () {

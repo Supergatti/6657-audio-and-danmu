@@ -16,6 +16,15 @@ from websockets.asyncio.server import serve, ServerConnection
 from websockets.http11 import Request, Response
 from websockets.datastructures import Headers
 
+from danmaku_common import (
+    BatchWriter,
+    SingleFileWriter,
+    create_danmaku_writers,
+    fetch_room_info,
+    format_chat_json_lines,
+    parse_douyu_packets,
+)
+
 # 屏蔽websockets库的所有日志输出
 logging.getLogger('websockets').setLevel(logging.CRITICAL)
 logging.getLogger('websockets.server').setLevel(logging.CRITICAL)
@@ -34,6 +43,8 @@ ROOM_URL = "https://www.douyu.com/6979222"
 WS_HOST = "127.0.0.1"
 WS_PORT = 8766
 MAX_DANMAKU_CACHE = 500
+OUT_DIR = "danmaku_logs"
+BATCH_SIZE = 5000
 DEBUG = False
 WEB_ROOT = Path(__file__).parent / "web"
 
@@ -59,95 +70,15 @@ def _parse_kv(message: str) -> dict:
 
 
 def _fetch_room_info(room_url: str) -> dict:
-    try:
-        with urllib.request.urlopen(room_url, timeout=10) as response:
-            html = response.read().decode("utf-8", errors="ignore")
-    except Exception as exc:
-        _log(f"fetch room info failed: {exc}")
-        return {"host": "", "title": "", "live_time": ""}
-
-    # Extract room title from h1 tag
-    title = ""
-    h1_match = re.search(r'<h1[^>]*>([^<]+)</h1>', html)
-    if h1_match:
-        title = h1_match.group(1).strip()
-    
-    # Extract host name from og:title meta tag
-    host = ""
-    og_match = re.search(r'<meta[^>]+property="og:title"[^>]+content="([^"]+)"', html)
-    if og_match:
-        og_text = og_match.group(1)
-        parts = og_text.split('_')
-        if len(parts) >= 3:
-            host = parts[2].replace('直播', '').strip()
-    
-    # Try to find live time from JSON data
-    live_time = ""
-    show_time_match = re.search(r'"show_time"\s*:\s*"([^"]+)"', html)
-    if show_time_match:
-        live_time = show_time_match.group(1)
-    
-    _log(f"Fetched room info - host: {host}, title: {title}, live_time: {live_time}")
-    return {"host": host, "title": title, "live_time": live_time}
+    return fetch_room_info(room_url, log=_log)
 
 
 def _format_chat_lines(text: str) -> list[str]:
-    if not hasattr(_format_chat_lines, "_debug_count"):
-        _format_chat_lines._debug_count = 0  # type: ignore[attr-defined]
-        _format_chat_lines._stats = {  # type: ignore[attr-defined]
-            "total": 0,
-            "chat": 0,
-            "types": Counter(),
-        }
-    stats = _format_chat_lines._stats  # type: ignore[attr-defined]
-    lines = []
-    for msg in text.split("\x00"):
-        if not msg:
-            continue
-        data = _parse_kv(msg)
-        msg_type = data.get("type", "")
-        if msg_type:
-            stats["types"][msg_type] += 1
-        stats["total"] += 1
-
-        if msg_type not in {"chatmsg", "hischatmsg"}:
-            continue
-        stats["chat"] += 1
-        user = data.get("nn", "")
-        content = data.get("txt", "")
-        if DEBUG and _format_chat_lines._debug_count < 3:  # type: ignore[attr-defined]
-            _format_chat_lines._debug_count += 1  # type: ignore[attr-defined]
-            preview_keys = list(data.keys())[:20]
-            _log(f"chat payload keys={preview_keys}, txt={data.get('txt')}")
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        lines.append(f"[{timestamp}] {user}: {content}")
-
-    if DEBUG and stats["total"] % 200 == 0:
-        top_types = stats["types"].most_common(5)
-        _log(f"parsed total={stats['total']} chat={stats['chat']} top_types={top_types}")
-    return lines
+    return format_chat_json_lines(text, debug=DEBUG, log=_log)
 
 
 def _parse_douyu_packets(buffer: bytearray, data: bytes) -> list[str]:
-    buffer.extend(data)
-    lines: list[str] = []
-    while len(buffer) >= 12:
-        length = struct.unpack("<I", buffer[:4])[0]
-        # Allow some flexibility for protocol variations
-        if length > 0x100000:  # Sanity check for corruption
-            del buffer[:]
-            break
-        packet_size = length + 4
-        if len(buffer) < packet_size:
-            break
-        packet = buffer[12:packet_size - 1]
-        del buffer[:packet_size]
-        try:
-            text = packet.decode("utf-8", errors="replace")
-        except UnicodeDecodeError:
-            continue
-        lines.extend(_format_chat_lines(text))
-    return lines
+    return parse_douyu_packets(buffer, data, _format_chat_lines)
 
 
 class DanmakuCache:
@@ -297,10 +228,17 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--debug", action="store_true", help="启用调试日志")
     parser.add_argument("--headed", action="store_true", help="显示浏览器窗口（默认无头模式）")
     parser.add_argument("--max-cache", type=int, default=MAX_DANMAKU_CACHE, help="最大缓存弹幕数")
+    parser.add_argument("--out-dir", default=OUT_DIR, help="弹幕日志输出目录")
+    parser.add_argument("--batch-size", type=int, default=BATCH_SIZE, help="每个日志文件最大行数")
     return parser.parse_args()
 
 
-async def _run_danmaku_crawler(args, queue: asyncio.Queue) -> None:
+async def _run_danmaku_crawler(
+    args,
+    queue: asyncio.Queue,
+    batch_writer: BatchWriter,
+    single_writer: SingleFileWriter,
+) -> None:
     """独立的弹幕获取任务"""
     try:
         from playwright.async_api import async_playwright
@@ -310,10 +248,18 @@ async def _run_danmaku_crawler(args, queue: asyncio.Queue) -> None:
         return
 
     loop = asyncio.get_running_loop()
+    last_print_time = {"ts": 0.0}
 
     def on_message(line: str) -> None:
         """收到弹幕时的回调"""
-        print(line)  # 总是打印弹幕
+        batch_writer.write_line(line)
+        single_writer.write_line(line)
+        # 只每10秒打印一条弹幕到cmd
+        import time
+        now = time.time()
+        if now - last_print_time["ts"] > 10:
+            print(f"[弹幕] {line}")
+            last_print_time["ts"] = now
         loop.call_soon_threadsafe(queue.put_nowait, line)
 
     try:
@@ -405,26 +351,29 @@ async def _run_websocket_server(args, queue: asyncio.Queue, clients: Set[ServerC
     
     try:
         process_request = _process_request_factory(room_id)
-        
         # 创建广播任务
         broadcast_task = asyncio.create_task(_broadcast_loop(queue, clients, cache))
-        
         async with serve(
             lambda ws: _ws_handler(ws, clients, cache),
             args.host,
             args.port,
             process_request=process_request,
         ) as server:
-            print(f"✓ 弹幕飘过服务器成功启动!")
-            print(f"✓ 在浏览器中打开: http://{args.host}:{args.port}")
-            print(f"✓ 按 F12 打开开发者工具查看WebSocket连接状态")
-            _log(f"HTTP服务器: http://{args.host}:{args.port}")
-            _log(f"WebSocket地址: ws://{args.host}:{args.port}")
-            print()
-            
-            # 等待广播任务
-            await broadcast_task
-            
+            print(f"\n============================")
+            print(f"✓ 斗鱼弹幕服务已启动！")
+            print(f"✓ HTTP访问:   http://{args.host}:{args.port}")
+            print(f"✓ WebSocket:  ws://{args.host}:{args.port}")
+            print(f"============================\n")
+            print(f"等待前端连接... (连接状态会在此显示)")
+            # 监听客户端连接状态
+            last_client_count = 0
+            import time
+            while True:
+                await asyncio.sleep(2)
+                client_count = len(clients)
+                if client_count != last_client_count:
+                    print(f"[服务] 当前WebSocket连接数: {client_count}")
+                    last_client_count = client_count
     except asyncio.CancelledError:
         _log("WebSocket服务器任务被取消")
         if broadcast_task:
@@ -455,6 +404,14 @@ async def main_async() -> None:
     room_info = _fetch_room_info(args.room_url)
     _log(f"房间信息 - 主播: {room_info.get('host', '')}, 标题: {room_info.get('title', '')}")
 
+    batch_writer, single_writer = create_danmaku_writers(
+        room_id=room_id,
+        room_info=room_info,
+        out_dir=args.out_dir,
+        batch_size=args.batch_size,
+        cwd=Path.cwd(),
+    )
+
     # 创建弹幕缓存和客户端集合
     cache = DanmakuCache(args.max_cache)
     queue: asyncio.Queue = asyncio.Queue()
@@ -462,7 +419,7 @@ async def main_async() -> None:
 
     # 创建两个独立的任务
     server_task = asyncio.create_task(_run_websocket_server(args, queue, clients, cache, room_id))
-    crawler_task = asyncio.create_task(_run_danmaku_crawler(args, queue))
+    crawler_task = asyncio.create_task(_run_danmaku_crawler(args, queue, batch_writer, single_writer))
 
     try:
         # 并发运行两个任务，任意一个失败都会停止
@@ -481,6 +438,9 @@ async def main_async() -> None:
         server_task.cancel()
         crawler_task.cancel()
         raise
+    finally:
+        batch_writer.close()
+        single_writer.close()
 
 
 if __name__ == "__main__":

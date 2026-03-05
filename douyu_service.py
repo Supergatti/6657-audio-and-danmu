@@ -15,8 +15,15 @@ from websockets.asyncio.server import ServerConnection as WebSocketServerProtoco
 from websockets.http11 import Request, Response
 from websockets.datastructures import Headers
 
+from danmaku_common import (
+    create_danmaku_writers,
+    fetch_room_info,
+    format_chat_text_lines,
+    parse_douyu_packets,
+)
+
 ROOM_URL = "https://www.douyu.com/6979222"
-BATCH_SIZE = 2000
+BATCH_SIZE = 5000
 OUT_DIR = "danmaku_logs"
 DEBUG = True
 WS_HOST = "127.0.0.1"
@@ -46,36 +53,7 @@ def _parse_kv(message: str) -> dict:
 
 
 def _fetch_room_info(room_url: str) -> dict:
-    try:
-        with urllib.request.urlopen(room_url, timeout=10) as response:
-            html = response.read().decode("utf-8", errors="ignore")
-    except Exception as exc:
-        _log(f"fetch room info failed: {exc}")
-        return {"host": "", "title": "", "live_time": ""}
-
-    # Extract room title from h1 tag
-    title = ""
-    h1_match = re.search(r'<h1[^>]*>([^<]+)</h1>', html)
-    if h1_match:
-        title = h1_match.group(1).strip()
-    
-    # Extract host name from og:title meta tag
-    host = ""
-    og_match = re.search(r'<meta[^>]+property="og:title"[^>]+content="([^"]+)"', html)
-    if og_match:
-        og_text = og_match.group(1)
-        parts = og_text.split('_')
-        if len(parts) >= 3:
-            host = parts[2].replace('直播', '').strip()
-    
-    # Try to find live time from JSON data
-    live_time = ""
-    show_time_match = re.search(r'"show_time"\s*:\s*"([^"]+)"', html)
-    if show_time_match:
-        live_time = show_time_match.group(1)
-    
-    _log(f"Fetched room info - host: {host}, title: {title}, live_time: {live_time}")
-    return {"host": host, "title": title, "live_time": live_time}
+    return fetch_room_info(room_url, log=_log)
 
 
 def _sanitize_filename_part(value: str) -> str:
@@ -144,63 +122,11 @@ class SingleFileWriter:
 
 
 def _format_chat_lines(text: str) -> list[str]:
-    if not hasattr(_format_chat_lines, "_debug_count"):
-        _format_chat_lines._debug_count = 0  # type: ignore[attr-defined]
-        _format_chat_lines._stats = {  # type: ignore[attr-defined]
-            "total": 0,
-            "chat": 0,
-            "types": Counter(),
-        }
-    stats = _format_chat_lines._stats  # type: ignore[attr-defined]
-    lines = []
-    for msg in text.split("\x00"):
-        if not msg:
-            continue
-        data = _parse_kv(msg)
-        msg_type = data.get("type", "")
-        if msg_type:
-            stats["types"][msg_type] += 1
-        stats["total"] += 1
-
-        if msg_type not in {"chatmsg", "hischatmsg"}:
-            continue
-        stats["chat"] += 1
-        user = data.get("nn", "")
-        content = data.get("txt", "")
-        if DEBUG and _format_chat_lines._debug_count < 3:  # type: ignore[attr-defined]
-            _format_chat_lines._debug_count += 1  # type: ignore[attr-defined]
-            preview_keys = list(data.keys())[:20]
-            _log(f"chat payload keys={preview_keys}, txt={data.get('txt')}")
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        lines.append(f"[{timestamp}] {user}: {content}")
-
-    if DEBUG and stats["total"] % 200 == 0:
-        top_types = stats["types"].most_common(5)
-        _log(f"parsed total={stats['total']} chat={stats['chat']} top_types={top_types}")
-    return lines
+    return format_chat_text_lines(text, debug=DEBUG, log=_log)
 
 
 def _parse_douyu_packets(buffer: bytearray, data: bytes) -> list[str]:
-    buffer.extend(data)
-    lines: list[str] = []
-    while len(buffer) >= 12:
-        length = struct.unpack("<I", buffer[:4])[0]
-        # Allow some flexibility for protocol variations
-        if length > 0x100000: # Sanity check for corruption
-             del buffer[:]
-             break
-        packet_size = length + 4
-        if len(buffer) < packet_size:
-            break
-        packet = buffer[12:packet_size - 1]
-        del buffer[:packet_size]
-        try:
-            # Use 'replace' to debug potential encoding issues with Emoji
-            text = packet.decode("utf-8", errors="replace")
-        except UnicodeDecodeError:
-            continue
-        lines.extend(_format_chat_lines(text))
-    return lines
+    return parse_douyu_packets(buffer, data, _format_chat_lines)
 
 
 async def _broadcast_loop(queue: asyncio.Queue, clients: Set[WebSocketServerProtocol]) -> None:
@@ -372,24 +298,13 @@ async def main_async() -> None:
     _log(f"room_id={room_id} starting official client")
 
     room_info = _fetch_room_info(args.room_url)
-    fetch_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    header = (
-        f"# room_id={room_id} host={room_info.get('host','')} "
-        f"title={room_info.get('title','')} live_time={room_info.get('live_time','')} "
-        f"fetch_time={fetch_time}"
+    writer, single_writer = create_danmaku_writers(
+        room_id=room_id,
+        room_info=room_info,
+        out_dir=args.out_dir,
+        batch_size=args.batch_size,
+        cwd=Path.cwd(),
     )
-
-    file_tag = "_".join(
-        part for part in [
-            _sanitize_filename_part(room_info.get("host", "")),
-            _sanitize_filename_part(room_info.get("title", "")),
-        ]
-        if part
-    )
-
-    writer = BatchWriter(Path(args.out_dir), room_id, args.batch_size, header, file_tag)
-    single_file = Path.cwd() / f"danmaku_{room_id}.txt"
-    single_writer = SingleFileWriter(single_file, header)
     queue: asyncio.Queue = asyncio.Queue()
     clients: Set[WebSocketServerProtocol] = set()
 
