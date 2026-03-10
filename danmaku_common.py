@@ -1,6 +1,7 @@
 import re
 import struct
 import threading
+import time
 import urllib.request
 from collections import Counter
 from datetime import datetime
@@ -92,9 +93,24 @@ def _format_chat_lines(text: str, allowed_types: set[str], formatter: Callable[[
 def format_chat_json_lines(text: str, debug: bool = False, log: Optional[Callable[[str], None]] = None) -> list[str]:
     import json
 
+    def to_ordered_chat_data(data: dict) -> dict:
+        # Put the key fields at the front for easier log scanning.
+        ordered = {
+            "cst": data.get("cst") or str(int(time.time() * 1000)),
+            "nn": data.get("nn", ""),
+            "col": data.get("col", ""),
+            "txt": data.get("txt", ""),
+        }
+
+        for key, value in data.items():
+            if key not in ordered:
+                ordered[key] = value
+
+        return ordered
+
     def formatter(data: dict) -> str:
         try:
-            return json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+            return json.dumps(to_ordered_chat_data(data), ensure_ascii=False, separators=(",", ":"))
         except Exception as exc:
             return json.dumps({"error": str(exc), "raw": str(data)})
 

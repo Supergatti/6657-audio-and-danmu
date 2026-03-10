@@ -18,7 +18,7 @@ from websockets.datastructures import Headers
 from danmaku_common import (
     create_danmaku_writers,
     fetch_room_info,
-    format_chat_text_lines,
+    format_chat_json_lines,
     parse_douyu_packets,
 )
 
@@ -122,7 +122,7 @@ class SingleFileWriter:
 
 
 def _format_chat_lines(text: str) -> list[str]:
-    return format_chat_text_lines(text, debug=DEBUG, log=_log)
+    return format_chat_json_lines(text, debug=DEBUG, log=_log)
 
 
 def _parse_douyu_packets(buffer: bytearray, data: bytes) -> list[str]:
